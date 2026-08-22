@@ -54,6 +54,22 @@
   .trailtext{font-size:15px;line-height:1.9;white-space:pre-wrap}
   .traillink{display:inline-block;margin-top:8px;color:var(--cinnabar);font-size:13px}
   .trailempty{padding:36px 4px;line-height:2;opacity:.7}
+  #pocketbtn{position:fixed;right:0;top:64%;z-index:6;writing-mode:vertical-rl;
+    background:var(--card);border:1px solid var(--line);border-right:none;
+    padding:14px 8px;cursor:pointer;font-size:14px;letter-spacing:4px;border-radius:3px 0 0 3px}
+  #pocket{position:fixed;top:0;right:0;bottom:0;width:min(430px,92vw);z-index:8;
+    background:var(--paper);border-left:1px solid var(--line);
+    transform:translateX(100%);transition:transform .35s;overflow:auto;padding:22px}
+  #pocket.open{transform:none}
+  .pockethead{display:flex;align-items:center;gap:16px;margin-bottom:34px}
+  .pockethead h2{font-size:20px;line-height:1.4;font-weight:normal;letter-spacing:5px}
+  .pocketback{cursor:pointer;border:1px solid var(--line);background:#fffdf7;color:var(--ink);
+    padding:6px 12px;font:inherit;font-size:13px;border-radius:2px}
+  .pocketitem{padding:26px 8px 30px;border-top:1px solid var(--ink);border-bottom:1px solid var(--line)}
+  .pocketname{font-size:28px;line-height:1.5;font-weight:normal;letter-spacing:3px}
+  .pocketfrom{margin-top:8px;color:var(--cinnabar);font-size:13px}
+  .pocketdesc{margin-top:24px;font-size:15px;line-height:2;white-space:pre-wrap}
+  .pocketempty{padding:42px 8px;border-top:1px solid var(--line);line-height:2;opacity:.68}
   #wallbtn{position:fixed;right:0;top:45%;z-index:6;writing-mode:vertical-rl;
     background:var(--card);border:1px solid var(--line);border-right:none;
     padding:14px 8px;cursor:pointer;font-size:14px;letter-spacing:4px;border-radius:3px 0 0 3px}
@@ -70,11 +86,13 @@
   .walltab{cursor:pointer;border:1px solid var(--line);background:#fffdf7;color:var(--ink);
     padding:6px 10px;font:inherit;font-size:13px;border-radius:2px}
   .walltab.active{background:var(--ink);color:#fffdf7;border-color:var(--ink)}
-  #zoomctl{position:fixed;right:10px;top:92px;z-index:7;display:flex;flex-direction:column;
-    align-items:center;gap:7px;padding:9px 7px;background:var(--card);border:1px solid var(--line);
-    border-radius:3px;box-shadow:2px 3px 0 #0001}
-  #zoomrange{writing-mode:vertical-lr;direction:rtl;width:28px;height:150px;accent-color:var(--cinnabar)}
-  #zoomvalue{border:0;background:transparent;color:var(--ink);font:11px/1 inherit;cursor:pointer;padding:3px}
+  #zoomctl{position:fixed;right:20px;top:94px;z-index:7;display:flex;align-items:center;
+    background:var(--card);border:1px solid var(--line);border-radius:3px;box-shadow:2px 3px 0 #0001;
+    overflow:hidden}
+  #zoomctl button{border:0;background:transparent;color:var(--ink);font:15px/1.2 inherit;
+    cursor:pointer;padding:8px 10px}
+  #zoomctl .zoomstep:hover{color:var(--cinnabar)}
+  #zoomvalue{min-width:48px;font-size:11px!important;letter-spacing:1px;border-inline:1px solid var(--line)!important}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .mini{cursor:pointer;border:1px solid var(--line);background:#fffdf7;padding:6px;
     transform:rotate(var(--tilt));box-shadow:1px 2px 0 #0001}
@@ -123,9 +141,15 @@
   <div class="trailhead"><button class="trailback" id="trailback" type="button">← 返回地图</button><h2>旅行足迹</h2></div>
   <div id="traillist"></div>
 </div>
+<button id="pocketbtn" type="button">随身口袋</button>
+<div id="pocket">
+  <div class="pockethead"><button class="pocketback" id="pocketback" type="button">← 返回地图</button><h2>随身口袋</h2></div>
+  <div id="pocketbody" aria-live="polite"></div>
+</div>
 <div id="zoomctl" aria-label="地图缩放">
-  <input id="zoomrange" type="range" min="100" max="400" step="10" value="100" aria-label="地图缩放百分比">
+  <button class="zoomstep" id="zoomout" type="button" aria-label="缩小地图">－</button>
   <button id="zoomvalue" type="button" title="恢复100%">100%</button>
+  <button class="zoomstep" id="zoomin" type="button" aria-label="放大地图">＋</button>
 </div>
 <div id="wallbtn">明信片墙</div>
 <div id="wall">
@@ -175,7 +199,6 @@ function clampMapPan(){
 function applyMapTransform(){
   clampMapPan();
   $("map").style.transform=`translate(${MAP_X}px,${MAP_Y}px) scale(${MAP_ZOOM})`;
-  $("zoomrange").value=String(Math.round(MAP_ZOOM*100));
   $("zoomvalue").textContent=`${Math.round(MAP_ZOOM*100)}%`;
 }
 function setMapZoom(next,cx=innerWidth/2,cy=innerHeight/2){
@@ -186,7 +209,8 @@ function setMapZoom(next,cx=innerWidth/2,cy=innerHeight/2){
   MAP_Y=(cy-innerHeight/2)-(cy-innerHeight/2-MAP_Y)*ratio;
   MAP_ZOOM=next;applyMapTransform();
 }
-$("zoomrange").addEventListener("input",e=>setMapZoom(Number(e.target.value)/100));
+$("zoomout").onclick=()=>setMapZoom(MAP_ZOOM/1.25);
+$("zoomin").onclick=()=>setMapZoom(MAP_ZOOM*1.25);
 $("zoomvalue").onclick=()=>{MAP_ZOOM=1;MAP_X=0;MAP_Y=0;applyMapTransform();};
 $("mapwrap").addEventListener("wheel",e=>{
   e.preventDefault();setMapZoom(MAP_ZOOM*(e.deltaY<0?1.12:.89),e.clientX,e.clientY);
@@ -464,6 +488,19 @@ function renderNow(st){
     $("skycap").style.background=cap;$("now").style.background=card+"dd";}
 }
 
+/* ── 随身口袋 ────────────────────────────────────────────── */
+function renderPocket(item){
+  if(!item){
+    $("pocketbody").innerHTML='<div class="pocketempty">他还空着手。路上真正捡起的东西，会留在这里陪他穿过下一扇门。</div>';
+    return;
+  }
+  $("pocketbody").innerHTML=`<article class="pocketitem">
+    <h3 class="pocketname">${escapeHtml(item.name||"无名之物")}</h3>
+    <div class="pocketfrom">来自 ${escapeHtml(item.from||"路上")}</div>
+    <div class="pocketdesc">${escapeHtml(item.desc||"")}</div>
+  </article>`;
+}
+
 /* ── 旅行足迹 ────────────────────────────────────────────── */
 const ACTION_ZH={land:"降落",walk:"步行",walk_to:"赶路",look:"环顾",listen:"聆听",
   wait:"停留",ask:"询问",mark:"标记",postcard:"寄出明信片",land_history:"抵达记录"};
@@ -604,6 +641,7 @@ async function load(){
     renderNow(st);
     renderMap(hist,marks,sights,cards);
     renderTrail(hist.footprints||[]);
+    renderPocket(st.souvenir);
     renderWall(cards);
   }catch(e){/* 他不在线也不炸,下轮再来 */}
 }
@@ -613,6 +651,12 @@ function setWall(open){
 }
 $("wallbtn").onclick=()=>setWall(true);
 $("wallback").onclick=()=>setWall(false);
+function setPocket(open){
+  $("pocket").classList.toggle("open",open);
+  $("pocketbtn").style.display=open?"none":"block";
+}
+$("pocketbtn").onclick=()=>setPocket(true);
+$("pocketback").onclick=()=>setPocket(false);
 function setCardFilter(filter){
   CARD_FILTER=filter;
   const replied=filter==="replied";
