@@ -4345,9 +4345,16 @@ async def listen_impl(seconds: int = 10) -> dict:
     # ── 2. Capture & analyse ─────────────────────────────────────────
     stream_url = station["stream_url"]
     try:
-        analysis = await asyncio.wait_for(listen_mod.capture(stream_url, seconds), timeout=seconds + 20)
+        analysis = await asyncio.wait_for(
+            listen_mod.capture(stream_url, seconds),
+            timeout=seconds + (115 if listen_mod.hearing_enabled() else 20),
+        )
     except (asyncio.TimeoutError, Exception):
         analysis = None
+
+    hearing = (analysis or {}).pop("hearing", None) or {
+        "analyzed": False, "stage": "capture", "error": "capture_failed",
+    }
 
     # ── 2b. Try to actually play the stream ──────────────────────────
     try:
@@ -4430,6 +4437,9 @@ async def listen_impl(seconds: int = 10) -> dict:
             "stream_url": stream_url,
             "station": station,
             "analysis": analysis,
+            "hearing": hearing,
+            "heard": bool(hearing.get("analyzed")),
+            "radio_description_source": "acoustic_analysis" if analysis and analysis.get("analyzed") else "genre_fallback",
             "soundscape": sound_text,
             "playing": playing,
         },
@@ -5979,7 +5989,11 @@ async def walk(direction: str = "forward", distance_km: float = 2.0) -> dict:
 
 @mcp.tool()
 async def listen(seconds: int = 10) -> dict:
-    """Tune into the nearest radio station and listen for a few seconds."""
+    """收听附近电台：一次返回 stream_url、基础声景和真实 hearing（已配置耳朵时）。
+
+    想听内容直接调用此工具，无需再手接 URL。hearing.analyzed=true 才代表
+    真实内容识别；失败时仍保留按类型补写的场景文字、URL 和明确错误。
+    """
     return await listen_impl(seconds)
 
 

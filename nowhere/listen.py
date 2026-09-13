@@ -1,16 +1,23 @@
 """Capture and analyse a live radio stream.
 
 * With ffmpeg: decode 10 s of audio to PCM, run numpy spectral analysis.
-* Without ffmpeg (degraded): read raw bytes, estimate jitter/energy, infer
-  texture from genre metadata. ``analyzed=False`` signals the degraded path.
+* With an optional hearing command: analyze that same captured audio's content.
+* On capture failure: return an explicit error and preserve genre fallback.
 * Never raises.
 """
 
 from __future__ import annotations
 
 import shutil
+import asyncio
+import io
+import json
+import os
+import re
 import subprocess
 import time
+import wave
+from urllib.parse import urlparse
 from typing import Final
 
 import numpy as np
@@ -174,18 +181,59 @@ def _degraded_result(genre: str = "") -> dict:
 async def capture(stream_url: str, seconds: int = 10) -> dict:
     """Capture *seconds* of audio from *stream_url* and analyze it.
 
-    Uses ffmpeg when available; otherwise falls back to a degraded byte-count
-    heuristic.  **Never raises** — on any failure returns ``analyzed=False``.
+    **Never raises** — capture failures return ``analyzed=False`` with an error.
+    Optional content-analysis failure does not discard successful acoustic data.
     """
     try:
         return await _capture_ffmpeg(stream_url, seconds)
-    except Exception:
-        pass
+    except Exception as exc:
+        error = "capture_failed"
+        if isinstance(exc, FileNotFoundError):
+            error = "ffmpeg_unavailable"
+        elif isinstance(exc, subprocess.TimeoutExpired):
+            error = "capture_timeout"
+        elif str(exc) == "stream_forbidden":
+            error = "stream_forbidden"
+        result = _degraded_result()
+        hearing = {"analyzed": False, "seconds": seconds, "stage": "capture", "error": error}
+        if error == "stream_forbidden":
+            hearing.update(http_status=403, message="电台拒绝连接")
+        result.update(error=error, hearing=hearing)
+        return result
 
+
+def hearing_enabled() -> bool:
+    return bool(os.environ.get("NOWHERE_HEARING_COMMAND", "").strip())
+
+
+async def _hear_wav(audio: bytes) -> dict:
+    """Optional external analyzer: pass this same WAV, never the stream URL.
+
+    The configured command is a JSON argv array (no shell). It receives WAV
+    bytes on stdin and returns a hearing object on stdout. Audio stays out of
+    the tool response and travel history.
+    """
+    if not hearing_enabled():
+        return {"analyzed": False, "error": "hearing_not_configured", "stage": "analysis"}
     try:
-        return await _capture_degraded(stream_url, seconds)
+        command = json.loads(os.environ["NOWHERE_HEARING_COMMAND"])
+        if not isinstance(command, list) or not command or not all(isinstance(arg, str) for arg in command):
+            raise ValueError("invalid hearing command")
+        result = await asyncio.to_thread(
+            subprocess.run, command, input=audio, capture_output=True, timeout=95, check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("hearing command failed")
+        hearing = json.loads(result.stdout)
+        if not isinstance(hearing, dict) or not isinstance(hearing.get("analyzed"), bool):
+            raise ValueError("invalid hearing result")
+        allowed = {"analyzed", "seconds", "has_voice", "transcript", "language", "audio_type",
+                   "music", "environment", "description", "confidence", "segments", "error", "stage"}
+        return {key: value for key, value in hearing.items() if key in allowed}
+    except subprocess.TimeoutExpired:
+        return {"analyzed": False, "error": "hearing_timeout", "stage": "analysis"}
     except Exception:
-        return _degraded_result()
+        return {"analyzed": False, "error": "hearing_provider_failed", "stage": "analysis"}
 
 
 async def _capture_ffmpeg(stream_url: str, seconds: int) -> dict:
@@ -195,30 +243,42 @@ async def _capture_ffmpeg(stream_url: str, seconds: int) -> dict:
 
     cmd = [
         "ffmpeg",
+        "-nostdin",
+        "-user_agent", "Mozilla/5.0",
         "-i", stream_url,
         "-t", str(seconds),
-        "-f", "wav",
+        "-f", "s16le",
         "-acodec", "pcm_s16le",
         "-ar", "22050",
         "-ac", "1",
         "-loglevel", "error",
         "pipe:1",
     ]
+    host = urlparse(stream_url).hostname or ""
+    if host == "rai.it" or host.endswith(".rai.it"):
+        cmd[cmd.index("-i"):cmd.index("-i")] = ["-referer", "https://www.raiplaysound.it/"]
 
     proc = await _run_subprocess(cmd, timeout=seconds + 15)
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {proc.stderr}")
+        if re.search(rb"\b403\b", proc.stderr):
+            raise RuntimeError("stream_forbidden")
+        raise RuntimeError("capture_failed")
 
-    # Parse WAV: skip 44-byte RIFF header
+    # Raw PCM avoids assuming a fixed 44-byte WAV header (ffmpeg adds chunks).
     raw = proc.stdout
-    if len(raw) < 44:
-        raise ValueError("WAV too short")
+    if len(raw) < _FFT_SIZE * 2 or len(raw) % 2:
+        raise ValueError("PCM too short or incomplete")
 
-    pcm = np.frombuffer(raw[44:], dtype=np.int16).astype(np.float32) / 32768.0
-    if len(pcm) == 0:
-        raise ValueError("Empty PCM")
-
-    return analyze_pcm(pcm, 22050)
+    pcm = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    analysis = analyze_pcm(pcm, 22050)
+    wav_bytes = io.BytesIO()
+    with wave.open(wav_bytes, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(22050)
+        wav.writeframes(raw)
+    analysis["hearing"] = await _hear_wav(wav_bytes.getvalue())
+    return analysis
 
 
 async def _run_subprocess(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:

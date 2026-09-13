@@ -407,3 +407,21 @@ CC BY-NC 4.0（署名 + 禁止商用，二改随意）
 见 [LICENSE](LICENSE)。
 
 数据文件（GeoNames / WorldClim / Met Museum / iNaturalist 等）各有其原始许可，归原提供者所有。
+# Optional audio content recognition
+
+`listen` keeps returning its radio URL, station, soundscape and genre fallback
+text. Set `NOWHERE_HEARING_COMMAND` to a JSON array of executable arguments to
+add real speech/music recognition in the same call. The process receives the
+captured mono PCM WAV on stdin and must write a JSON object with `analyzed`
+(boolean), and optional `transcript`, `language`, `description`, `audio_type`,
+`music`, `environment`, `has_voice`, `confidence`, `segments`, `seconds`, `error`
+and `stage` fields. It runs without a shell with a 95-second timeout.
+
+Both acoustic analysis and content recognition use the same capture; audio bytes
+are not included in the tool result or journey history. Content recognition lives
+in `data.hearing` and `data.heard`; acoustic metrics remain in `data.analysis`.
+`data.radio_description_source` distinguishes `acoustic_analysis` from
+`genre_fallback`. The fallback prose remains even when hearing fails.
+HTTP 403 is returned as `stream_forbidden` / `电台拒绝连接`, with `stage=capture`;
+it never invokes the content analyzer. Without a configured command the game
+works normally and hearing reports `hearing_not_configured` after capture.
