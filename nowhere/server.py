@@ -6166,18 +6166,22 @@ def _build_place_coords() -> dict[str, tuple[float, float]]:
 
 @mcp.tool()
 def postcards() -> dict:
-    """看看收到的明信片。来自不同时空的问候。"""
-    cards = _state.postcards
+    """回看已保存的明信片和人类回信。跨旅程、跨会话，新的在前。"""
+    cards = placememory.postcards()
     if not cards:
-        return {"text": "还没收到过明信片。空空的。", "data": {"postcards": []}}
+        return {"text": "还没有保存的明信片。空空的。", "data": {"postcards": []}}
     parts = []
     for c in cards:
         stamp = c.get("stamp", {})
         who = stamp.get("place", "远方")
         msg = c.get("text", "")
         time_str = stamp.get("local_time", "")
-        parts.append(f"来自{who}（{time_str}）：{msg}")
-    text = f"你收到了 {len(cards)} 张明信片。\n" + "\n---\n".join(parts)
+        lines = [f"明信片 #{c.get('id', '?')}，来自{who}（{time_str}）：{msg}"]
+        for reply in c.get("replies") or []:
+            reply_text = reply.get("content", "") if isinstance(reply, dict) else reply
+            lines.append(f"回信：{reply_text}")
+        parts.append("\n".join(lines))
+    text = f"保存了 {len(cards)} 张明信片（新的在前）。\n" + "\n---\n".join(parts)
     return {"text": text, "data": {"postcards": cards}}
 
 
